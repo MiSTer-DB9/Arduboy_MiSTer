@@ -81,9 +81,14 @@ module emu
     // 1 - D-/TX
     // 2..6 - USR2..USR6
     // Set USER_OUT to 1 to read from USER_IN.
-    input   [6:0] USER_IN,
-    output  [6:0] USER_OUT
+	output	USER_OSD,
+	output	[1:0] USER_MODE,
+	input	[7:0] USER_IN,
+	output	[7:0] USER_OUT,
+
+	input         OSD_STATUS
 );
+
 
 assign HDMI_ARX    = status[1] ? 8'd9  : 8'd16;
 assign HDMI_ARY    = status[1] ? 8'd16 : 8'd9;
@@ -91,8 +96,14 @@ assign VGA_F1      = 0;
 
 assign LED_POWER   = 0;
 assign LED_DISK[1] = 0;
-assign USER_OUT[0] = 1;
-assign USER_OUT[6:2] = 5'd0;
+wire         CLK_JOY = CLK_50M;         //Assign clock between 40-50Mhz
+wire   [2:0] JOY_FLAG  = {status[30],status[31],status[29]}; //Assign 3 bits of status (31:29) o (63:61)
+wire         JOY_CLK, JOY_LOAD, JOY_SPLIT, JOY_MDSEL;
+wire   [5:0] JOY_MDIN  = JOY_FLAG[2] ? {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]} : 1;
+wire         JOY_DATA  = JOY_FLAG[1] ? USER_IN[5] : '1;
+assign       USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : 1;
+assign       USER_MODE = JOY_FLAG[2:1] ;
+assign       USER_OSD  = joydb_1[10] & joydb_1[6];
 
 assign AUDIO_S     = 0;
 assign AUDIO_L     = {1'b0,{15{Buzzer1}}} + {1'b0,{15{Buzzer2}}};
@@ -133,12 +144,16 @@ localparam CONF_STR =
     "-;",
     "O1,Orientation,Horizontal,Vertical;",
     "O35,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+    "-;",
+    "OUV,UserIO Joystick,Off,DB9MD,DB15 ;",
+    "OT,UserIO Players, 1 Player,2 Players;",
+    "-;",
     "OFG,ADC,Random,AnalogStick,Paddle;",
     "J1,A,B;",
     "V,v",`BUILD_DATE
 };
 
-wire [31:0] joystick;
+wire [31:0] joystick_USB;
 wire [15:0] joystick_analog;
 wire  [7:0] paddle;
 wire [31:0] status;
@@ -151,12 +166,45 @@ wire [14:0] ioctl_addr;
 wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_index;
 
+// B A U D L R 
+wire [31:0] joystick = joydb_1ena ? (OSD_STATUS? 32'b000000 : joydb_1[5:0]) : joystick_USB;
+
+wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
+wire        joydb_1ena = |JOY_FLAG[2:1]              ;
+wire        joydb_2ena = |JOY_FLAG[2:1] & JOY_FLAG[0];
+
+//----BA 9876543210
+//----MS ZYXCBAUDLR
+reg [15:0] JOYDB9MD_1,JOYDB9MD_2;
+joy_db9md joy_db9md
+(
+  .clk       ( CLK_JOY    ), //40-50MHz
+  .joy_split ( JOY_SPLIT  ),
+  .joy_mdsel ( JOY_MDSEL  ),
+  .joy_in    ( JOY_MDIN   ),
+  .joystick1 ( JOYDB9MD_1 ),
+  .joystick2 ( JOYDB9MD_2 )	  
+);
+
+//----BA 9876543210
+//----LS FEDCBAUDLR
+reg [15:0] JOYDB15_1,JOYDB15_2;
+joy_db15 joy_db15
+(
+  .clk       ( CLK_JOY   ), //48MHz
+  .JOY_CLK   ( JOY_CLK   ),
+  .JOY_DATA  ( JOY_DATA  ),
+  .JOY_LOAD  ( JOY_LOAD  ),
+  .joystick1 ( JOYDB15_1 ),
+  .joystick2 ( JOYDB15_2 )	  
+);
+
 hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
     .clk_sys(clk_sys),
     .HPS_BUS(HPS_BUS),
     .conf_str(CONF_STR),
-    .joystick_0(joystick),
+    .joystick_0(joystick_USB),
     .joystick_analog_0(joystick_analog),
     .paddle_0(paddle),
     .status(status),
@@ -167,7 +215,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
     .ioctl_index(ioctl_index),
     .ioctl_wr(ioctl_wr),
     .ioctl_addr(ioctl_addr),
-    .ioctl_dout(ioctl_dout)
+    .ioctl_dout(ioctl_dout),
+    .joy_raw(OSD_STATUS? joydb_1[5:0] : 6'b000000 )
 );
 
 (* ram_init_file = "Arduventure.mif" *)
@@ -232,7 +281,7 @@ atmega32u4 atmega32u4
     .spi_scl(oled_clk),
     .spi_mosi(oled_data),
     .uart_rx(USER_IN[0]),
-    .uart_tx(USER_OUT[1])
+    //.uart_tx(USER_OUT[1])
 );
 
 wire pixelValue, ce_pix;
