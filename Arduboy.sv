@@ -219,7 +219,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
     .joy_raw(OSD_STATUS? joydb_1[5:0] : 6'b000000 )
 );
 
-(* ram_init_file = "Arduventure.mif" *)
+(* ram_init_file = "rtl/Arduventure.mif" *)
 reg  [1:0][7:0] rom[16384];
 wire [13:0] pgm_addr;
 reg  [15:0] pgm_data;
