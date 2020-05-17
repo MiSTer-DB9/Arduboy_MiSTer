@@ -167,7 +167,7 @@ wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_index;
 
 // B A U D L R 
-wire [31:0] joystick = joydb_1ena ? (OSD_STATUS? 32'b000000 : joydb_1[5:0]) : joystick_USB;
+wire [31:0] joystick = joydb_1ena ? joydb_1[5:0] : joystick_USB;
 
 wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
 wire        joydb_1ena = |JOY_FLAG[2:1]              ;
@@ -216,7 +216,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
     .ioctl_wr(ioctl_wr),
     .ioctl_addr(ioctl_addr),
     .ioctl_dout(ioctl_dout),
-    .joy_raw(OSD_STATUS? joydb_1[5:0] : 6'b000000 )
+    .joy_raw(joydb_1[5:0]),
 );
 
 (* ram_init_file = "rtl/Arduventure.mif" *)
