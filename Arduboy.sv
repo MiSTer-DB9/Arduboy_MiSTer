@@ -307,7 +307,7 @@ wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_index;
 
 // B A U D L R 
-wire [31:0] joystick = joydb_1ena ? joydb_1[5:0] : joystick_USB;
+wire [31:0] joystick = joydb_1ena ? (OSD_STATUS ? 32'b0 : joydb_1[5:0]) : joystick_USB;
 
 
 
