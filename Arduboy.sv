@@ -179,15 +179,14 @@ module emu
 	input         OSD_STATUS
 );
 
-
+assign ADC_BUS  = 'Z;
+assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
+assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
 
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_PP default (port_batch replaces with USER_PP_DRIVE)
 assign USER_PP = USER_PP_DRIVE;
 // [MiSTer-DB9 END]
-wire [1:0] ar = status[9:8];
-
-assign VIDEO_ARX = (!ar) ? (status[1] ? 8'd9  : 8'd16) : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? (status[1] ? 8'd16 : 8'd9 ) : 12'd0;
 
 assign VGA_F1 = 0;
 assign VGA_SCALER  = 0;
@@ -195,9 +194,17 @@ assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
+assign FB_FORCE_BLANK = 0;
+
+assign AUDIO_S     = 0;
+assign AUDIO_L     = {1'b0,{15{Buzzer1}}} + {1'b0,{15{Buzzer2}}};
+assign AUDIO_R     = AUDIO_L;
+assign AUDIO_MIX   = 0;
 
 assign LED_POWER   = 0;
 assign LED_DISK[1] = 0;
+assign BUTTONS = 0;
+
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper
 wire         CLK_JOY = CLK_50M;                 // Assign clock between 40-50Mhz
 wire   [1:0] joy_type        = status[127:126]; // 0=Off, 1=Saturn, 2=DB9MD, 3=DB15
@@ -268,9 +275,10 @@ joydb joydb (
 assign USER_OUT = USER_OUT_DRIVE;
 // [MiSTer-DB9 END]
 
-assign AUDIO_S     = 0;
-assign AUDIO_L     = {1'b0,{15{Buzzer1}}} + {1'b0,{15{Buzzer2}}};
-assign AUDIO_R     = AUDIO_L;
+wire [1:0] ar = status[9:8];
+
+assign VIDEO_ARX = (!ar) ? (status[1] ? 8'd9  : 8'd16) : (ar - 1'd1);
+assign VIDEO_ARY = (!ar) ? (status[1] ? 8'd16 : 8'd9 ) : 12'd0;
 
 ///////////////////////////////////////////////////////
 
@@ -459,6 +467,7 @@ wire VSync, HSync, HBlank, VBlank;
 vgaHdmi vgaHdmi
 (
     .clock(clk_sys),
+    .clk_avr(clk_avr),
     .reset(reset),
     .oled_dc(oled_dc),
     .oled_clk(oled_clk),
@@ -488,8 +497,6 @@ arcade_video #(256,24) arcade_video
     .gamma_bus(),
     .fx(status[5:3])
 );
-
-assign {FB_PAL_CLK, FB_FORCE_BLANK, FB_PAL_ADDR, FB_PAL_DOUT, FB_PAL_WR} = '0;
 
 wire no_rotate = ~status[1];
 wire rotate_ccw = 1;
