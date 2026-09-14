@@ -121,6 +121,12 @@ reg clk_int_del;
 
 reg up_count;
 
+// Same defect class as atmega-tim-16bit.v: up_count only applies to genuine up/down-counting
+// modes (WGM 1/5); every other mode is monotonic on real hardware.
+wire [2:0] wgm_mode = {TCCRB[`WGM02], TCCRA[`WGM01:`WGM00]};
+wire is_updown_mode = (wgm_mode == 3'h1) || (wgm_mode == 3'h5);
+wire effective_up_count = is_updown_mode ? up_count : 1'b1;
+
 wire clk_active = |TCCRB[`CS02:`CS00];
 
 /* Sampling implementation */
@@ -281,10 +287,10 @@ begin
         clk_int_del <= clk_int; // Shift prescaller clock to a delay register every IO core positive edge clock to detect prescaller positive edges.
         if(((~clk_int_del & clk_int) || TCCRB[`CS02:`CS00] == 3'b001) && TCCRB[`CS02:`CS00] != 3'b000) // if prescaller clock = IO core clock disable prescaller positive edge detector.
         begin
-            if(up_count & ~halt)
+            if(effective_up_count & ~halt)
                 TCNT <= TCNT + 8'd1;
             else
-            if(~up_count & ~halt)
+            if(~effective_up_count & ~halt)
                 TCNT <= TCNT - 8'd1;
             // OCRA
             if(updt_ocr_on_top ? (TCNT == 8'hff):(TCNT == OCRA_int))
@@ -300,7 +306,7 @@ begin
                             8'hFF:  oca <= 1'b1;
                             default:
                             begin
-                                if(up_count)
+                                if(effective_up_count)
                                 begin
                                     case(TCCRA[`COM0A1:`COM0A0])
                                         2'h1: oca <= ~oca;
@@ -320,16 +326,8 @@ begin
                         endcase
                     end
                 endcase
-                if(TIMSK[`OCIE0A] == 1'b1)
-                begin
-                    if(ocra_p == ocra_n && clk_active == 1'b1)
-                        ocra_p <= ~ocra_p;
-                    else
-                    begin
-                        ocra_p <= 1'b0;
-                        ocra_n <= 1'b0;
-                    end
-                end
+                if(ocra_p == ocra_n && clk_active == 1'b1)
+                    ocra_p <= ~ocra_p;
             end
             // !OCRA
             if(USE_OCRB == "TRUE")
@@ -348,7 +346,7 @@ begin
                                 8'hFF:  ocb <= 1'b1;
                                 default:
                                 begin
-                                    if(up_count)
+                                    if(effective_up_count)
                                     begin
                                         case(TCCRA[`COM0B1:`COM0B0])
                                             2'h1: ocb <= ~ocb;
@@ -368,31 +366,15 @@ begin
                             endcase
                         end
                     endcase
-                    if(TIMSK[`OCIE0B] == 1'b1)
-                    begin
-                        if(ocrb_p == ocrb_n && clk_active == 1'b1)
-                            ocrb_p <= ~ocrb_p;
-                    end
-                    else
-                    begin
-                        ocrb_p <= 1'b0;
-                        ocrb_n <= 1'b0;
-                    end
+                    if(ocrb_p == ocrb_n && clk_active == 1'b1)
+                        ocrb_p <= ~ocrb_p;
                 end
             end // USE_OCRB != "TRUE"
             // TCNT overflow logick.
             if(&{TCNT == t_ovf_value, ~halt})
             begin
-                if(TIMSK[`TOIE0] == 1'b1)
-                begin
-                    if(tov_p == tov_n && clk_active == 1'b1)
-                        tov_p <= ~tov_p;
-                end
-                else
-                begin
-                    tov_p <= 1'b0;
-                    tov_n <= 1'b0;
-                end
+                if(tov_p == tov_n && clk_active == 1'b1)
+                    tov_p <= ~tov_p;
             end
             if(&{TCNT == top_value, ~halt})
             begin
@@ -434,9 +416,9 @@ begin
     end
 end
 
-assign tov_int = TIFR[`TOV0];
-assign ocra_int = TIFR[`OCF0A];
-assign ocrb_int = TIFR[`OCF0B];
+assign tov_int = TIFR[`TOV0] & TIMSK[`TOIE0];
+assign ocra_int = TIFR[`OCF0A] & TIMSK[`OCIE0A];
+assign ocrb_int = TIFR[`OCF0B] & TIMSK[`OCIE0B];
 
 assign oca_io_connect = (TCCRA[`COM0A1:`COM0A0] == 2'b00) ? 1'b0 : (TCCRA[`COM0A1:`COM0A0] == 2'b01 ? ((TCCRA[`WGM01:`WGM00] == 2'd1 || TCCRA[`WGM01:`WGM00] == 2'd3) ? TCCRB[`WGM02] : 1'b1) : 1'b1);
 assign ocb_io_connect = USE_OCRB == "TRUE" ? ((TCCRA[`COM0B1:`COM0B0] == 2'b00) ? 1'b0 : (TCCRA[`COM0B1:`COM0B0] == 2'b01 ? ((TCCRA[`WGM01:`WGM00] == 2'd1 || TCCRA[`WGM01:`WGM00] == 2'd3) ? TCCRB[`WGM02] : 1'b1) : 1'b1)) : 1'b0;

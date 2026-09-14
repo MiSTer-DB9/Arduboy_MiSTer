@@ -28,7 +28,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [48:0] HPS_BUS,
+	inout  [45:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -195,6 +195,12 @@ assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
+assign FB_FORCE_BLANK = 0;
+
+assign AUDIO_S     = 0;
+assign AUDIO_L     = {1'b0,{15{Buzzer1}}} + {1'b0,{15{Buzzer2}}};
+assign AUDIO_R     = AUDIO_L;
+assign AUDIO_MIX   = 0;
 
 assign LED_POWER   = 0;
 assign LED_DISK[1] = 0;
@@ -268,10 +274,6 @@ joydb joydb (
 assign USER_OUT = USER_OUT_DRIVE;
 // [MiSTer-DB9 END]
 
-assign AUDIO_S     = 0;
-assign AUDIO_L     = {1'b0,{15{Buzzer1}}} + {1'b0,{15{Buzzer2}}};
-assign AUDIO_R     = AUDIO_L;
-
 ///////////////////////////////////////////////////////
 
 wire clk_sys, clk_avr;
@@ -293,17 +295,22 @@ always @(posedge clk_avr) begin
         reset <= 1;
     end
 
-    if(status[0] | buttons[1] | RESET | ioctl_download) reset_cnt <= 0;
+    if(status[0] | buttons[1] | RESET | cart_download) reset_cnt <= 0;
 end
 
 ///////////////////////////////////////////////////////
+
+// Status Bit Map: (0..31 => "O", 32..63 => "o")
+// 0         1         2         3          4         5         6
+// 01234567890123456789012345678901 23456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
+// XXXXXXX XX     XX
 
 `include "build_id.v"
 localparam CONF_STR =
 {
     "Arduboy;;",
     "F0,BINHEX;",
-    "R0,Reset;",
     "-;",
     "O1,Orientation,Horizontal,Vertical;",
     "O89,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
@@ -314,6 +321,12 @@ localparam CONF_STR =
     // [MiSTer-DB9-Pro END]
     "-;",
     "OFG,ADC,Random,AnalogStick,Paddle;",
+    "-;",
+    "O2,Custom Palette,Off,On;",
+    "D0FC1,GBP,Load Palette;",
+    "D0O6,Palette Colors,Normal,Swapped;",
+    "-;",
+    "R0,Reset;",
     "J1,A,B;",
     "V,v",`BUILD_DATE
 };
@@ -334,6 +347,11 @@ wire [14:0] ioctl_addr;
 wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_index;
 
+// ioctl_index[5:0] tells files apart: game ROM (F0) = 0, palette (FC1) = 1.
+// ioctl_index[7:6] is the extension index within "BINHEX" (0 = BIN, 1 = HEX).
+wire cart_download    = (ioctl_index[5:0] == 0) && ioctl_download;
+wire palette_download = (ioctl_index[5:0] == 1) && ioctl_download;
+
 // B A U D L R 
 wire [31:0] joystick = joydb_1ena ? (OSD_STATUS ? 32'b0 : joydb_1_mapped[5:0]) : joystick_USB;
 
@@ -350,6 +368,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
     .paddle_0(paddle),
 
     .status(status),
+    .status_menumask(~status[2]),
     .buttons(buttons),
 
     .forced_scandoubler(forced_scandoubler),
@@ -386,7 +405,7 @@ always @ (posedge clk_sys) begin
     reg [15:0] addr;
     reg  [3:0] code;
 
-    if (ioctl_wr) begin
+    if (ioctl_wr && cart_download) begin
         if(!ioctl_index) rom[ioctl_addr[14:1]][ioctl_addr[0]] <= ioctl_dout;
         else begin
             if(state) state <= state + 1'd1;
@@ -418,7 +437,7 @@ end
 wire Buzzer1, Buzzer2;
 wire oled_dc, oled_clk, oled_data;
 
-atmega32u4 atmega32u4
+arduboy_board arduboy_board
 (
     .clk(clk_avr),
     .rst(reset),
@@ -455,16 +474,23 @@ vgaHdmi vgaHdmi
     .ce_pix(ce_pix)
 );
 
-arcade_video #(256,6) arcade_video
+// Kitrinx .gbp palette: file bytes shift in MSB-first.
+// FG color = bytes 0-2, BG color = bytes 9-11 (same layout as AdventureVision core).
+reg [127:0] palette = 128'hFFFFFF00000000000000000000000000; // default: stock white-on-black
+
+always @ (posedge clk_sys) if (palette_download & ioctl_wr) palette <= {palette[119:0], ioctl_dout};
+
+wire [23:0] color_fg = status[6] ? palette[55:32]   : palette[127:104];
+wire [23:0] color_bg = status[6] ? palette[127:104] : palette[55:32];
+
+arcade_video #(256,24) arcade_video
 (
     .*,
     .clk_video(clk_sys),
-    .RGB_in({6{pixelValue}}),
+    .RGB_in(status[2] ? (pixelValue ? color_fg : color_bg) : {24{pixelValue}}),
     .gamma_bus(),
     .fx(status[5:3])
 );
-
-assign {FB_PAL_CLK, FB_FORCE_BLANK, FB_PAL_ADDR, FB_PAL_DOUT, FB_PAL_WR} = '0;
 
 wire no_rotate = ~status[1];
 wire rotate_ccw = 1;
